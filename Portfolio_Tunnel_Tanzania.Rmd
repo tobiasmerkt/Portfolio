@@ -1,0 +1,387 @@
+---
+title: "ML - Assignment 2 - Pump it Up"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(dplyr)
+library(plyr)
+library(caret)
+library(ggplot2)
+library(DataExplorer)
+library(googleVis)
+library(randomForest)
+library(lubridate)
+library(geosphere)
+```
+
+### Import Data
+```{r}
+setwd("~/Desktop/IE/Semester 2/ML/Assignments/Assignment2")
+
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+labels <- read.csv("train_labels.csv")
+
+train <- merge(train, labels, by = "id", all.x = T)
+```
+
+# 1. Exploration - Train Data
+
+```{r}
+str(train)
+```
+Let's transform `region_code` and `district_code` to `factors`. Even though those are numeric variables, they account as factor since each code is related to the `region` variable or a geographic location. 
+```{r}
+train$region_code <- as.factor(train$region_code)
+train$district_code <- as.factor(train$district_code)
+```
+
+```{r}
+# divide continuous and discrete features
+# split_columns (data explorer pkg) creates two data frames, one with continuous and one with discrete values 
+values <- split_columns(train)
+cat_var <- values$discrete
+num_var <- values$continuous
+names(cat_var)
+names(num_var)
+```
+## 1.1 Categorical variables
+```{r}
+names(cat_var)
+```
+
+```{r}
+# bar plots for discrete features
+plot_bar(train)
+```
+  
+The plots above show that different features describe the same thing, but at different level of detail while other features represent a very big number of levels. We analyze those features in groups and see if they're relevant or alternatively if they can be modified or excluded.  
+Below are the *groups* of features identified:    
+  
+* `management_group`, `management`  
+* `scheme_management`, `scheme_name`  
+* `payment_type`, `payment`  
+* `quality_group`, `water_quality`  
+* `quantity_group`, `quantity`  
+* `source`, `source_type`, `source_class`  
+* `waterpoint_type`, `waterpoint_type_group`  
+* `region`, `region_code`, `district_code`  
+   
+## 1.2 Numeric variables
+```{r}
+names(num_var)
+```
+
+```{r}
+# box plot for continuous features
+plot_boxplot(train[,-1], by = "status_group")
+```
+
+```{r}
+# hitograms for continuous variables
+plot_histogram(train[,-1])
+```
+The `boxplot` and `histograms` show that many variables have value `0`, being - in most cases - the equivalent of `missing values`.  
+Let's see how many and in what percentage, there are for each feature.  
+```{r}
+# number of "zeros"
+print("Number of zeros (0) per feature")
+sort(sapply(num_var[, -which(names(num_var)%in%c("id"))], function(x) sum(x == 0)), decreasing = T)
+# percentage of "zeros"
+print("Percentage of zeros (0) per feature")
+sort(sapply(num_var[, -which(names(num_var)%in%c("id"))], function(x) paste(round(sum(x == 0)/length(x),5)*100, "%")), decreasing = T)
+```
+
+We exclude:  
+  
+* `num_private` because about 99% of the values are missing  
+* `amount_tsh` because about 70% of the values are missing  
+  
+```{r}
+# remove num_private
+train$num_private <- NULL
+test$num_private <- NULL
+
+# remove amount_tsh
+train$amount_tsh <- NULL
+test$amount_tsh <- NULL
+```
+
+Other variables have to be treated accordingly to replace `zero` values with appropriate values:  
+  
+* `population`  
+* `construction_year`  
+* `gps_height`  
+* `longitude` and `latitude`  
+  
+```{r}
+# # number of pumps in each functional status group
+# table(train$status_group)
+# 
+# # as proportions
+# prop.table(table(train$status_group))
+#   
+# # quantity variable vs the status of the pumps
+# table(train$quantity, train$status_group)
+# 
+# # as proportions
+# prop.table(table(train$quantity, train$status_group), margin = 1)
+```
+
+### Latitude & Longitude
+
+```{r}
+# scatter plot: latitude vs longitude with color as status_group
+ggplot(subset(train, latitude < 0 & longitude > 0),
+    aes(x = latitude, y = longitude, color = status_group)) + 
+    geom_point(shape = 1) + 
+    theme(legend.position = "top") +
+    scale_fill_manual(values=colors)
+```
+
+
+
+# 2. Feature Engineering
+
+## 2.1 Categorical Variables
+We are going to treat the *bundles* of categorical variables described in the section before (`1.1`). For each bundle of varaibles we group by every high level detail feature and analyze the different levels of grain between the variables and if it is possible to improve them.
+  
+### quantity_group, quantity
+In both features there are the same values, but with different naming. We will delete one of them: `quantity`. 
+```{r}
+train %>% group_by(quantity_group, quantity) %>% tally()
+```
+
+```{r}
+train$quantity_group <- NULL
+test$quantity_group <- NULL
+```
+
+### management_group, management
+I keep both management and management_group describe the same thing, at different level of detail. Both can be important.  
+```{r}
+train %>% group_by(management_group, management) %>% tally()
+```
+
+### scheme_management, scheme_name
+`scheme_name` has too many levels, we remove it.
+
+```{r}
+length(levels(train$scheme_name))
+length(levels(train$scheme_management))
+```
+
+```{r}
+train$scheme_name <- NULL
+test$scheme_name <- NULL
+```
+
+### payment_type, payment
+In both features there are the same values, but with different naming. We will delete one of them: `payment`. 
+```{r}
+train %>% group_by(payment_type, payment) %>% tally()
+```
+
+```{r}
+train$payment <- NULL
+test$payment <- NULL
+```
+
+### extraction_type_class, extraction_type_group, extraction_type
+The three features concerning `extraction` are related to each other. The `extraction_type` is thus used to create groups based on `extraction_type_group` and other values of `extraction_type`.  
+  
+```{r}
+train %>%
+  group_by(extraction_type_class, extraction_type_group, extraction_type) %>% tally()
+```
+
+```{r}
+train$extraction_type <- as.character(train$extraction_type)
+train$extraction_type[train$extraction_type %in% c("cemo", "climax")] <- "other motorpump"
+train$extraction_type[train$extraction_type %in% c("other - mkulima/shinyanga", "other - play pump", "walimi")] <- "other handpump"
+train$extraction_type[train$extraction_type %in% c("other - swn 81", "swn 80")] <- "swn"
+train$extraction_type[train$extraction_type %in% c("india mark ii", "india mark iii")] <- "india mark"
+
+train$extraction_type <- as.factor(train$extraction_type)
+# remove extraction_type_group
+train$extraction_type_group <- NULL
+```
+
+```{r}
+test$extraction_type <- as.character(test$extraction_type)
+
+# apply to test data
+test$extraction_type[test$extraction_type %in% c("cemo", "climax")] <- "other motorpump"
+test$extraction_type[test$extraction_type %in% c("other - mkulima/shinyanga", "other - play pump", "walimi")] <- "other handpump"
+test$extraction_type[test$extraction_type %in% c("other - swn 81", "swn 80")] <- "swn"
+test$extraction_type[test$extraction_type %in% c("india mark ii", "india mark iii")] <- "india mark"
+
+test$extraction_type <- as.factor(test$extraction_type)
+
+# remove extraction_type_group
+test$extraction_type_group <- NULL
+```
+
+### quality_group, water_quality
+Most of the values are the same, except for some that are better identified in `water_quality` rather than in `quality_group`. We keep the variable with higher level of detail: `water_quality`.  
+```{r}
+train %>% group_by(quality_group, water_quality) %>% tally()
+```
+
+```{r}
+train$quality_group <- NULL
+test$quality_group <- NULL
+```
+
+### source, source_type, source_class
+`source_type` and `source` have the same values, but `source` has a higher level of detail. Hence we will delete `source_type` and keep the other two features. Moreover we relabel `unknow` values in `source` with the value `other`.  
+```{r}
+train %>% group_by(source_class, source_type, source) %>% tally()
+```
+
+```{r}
+train$source_type <- NULL
+test$source_type <- NULL
+```
+
+### waterpoint_type, waterpoint_type_group
+The features are almost identical. We keep, as before, the feature with higher level of grain: `waterpoint_type`
+```{r}
+train %>% group_by(waterpoint_type_group, waterpoint_type) %>% tally()
+```
+
+```{r}
+train$waterpoint_type_group <- NULL
+test$waterpoint_type_group <- NULL
+```
+
+### installer
+
+There are a lot of terms that are likely the same installer, but have different names. Such as `Government` and `Govt`. We aggregate them taking the first 3 letters of each factor and making them lower case. Then, we can aggregate the most frequent and we put all other variables under `other`.  
+  
+```{r}
+summary(train$installer)[1:15]
+#length(unique(train$installer))
+
+# take first 3 letters and make them lowercase
+train$installer_grouped <- substr(tolower(train$installer),1,3)
+train$installer_grouped[train$installer_grouped %in% c(" ", "", "0", "_", "-")] <- "other"
+
+# top 15 occurrences
+install_top_15 <- names(summary(as.factor(train$installer_grouped)))[1:15]
+train$installer_grouped[!(train$installer_grouped %in% install_top_15)] <- "other"
+train$installer_grouped <- as.factor(train$installer_grouped)
+
+# Apply to test data
+test$installer_grouped <- substr(tolower(test$installer),1,3)
+test$installer_grouped[test$installer_grouped %in% c(" ", "", "0", "_", "-")] <- "other"
+test$installer_grouped[!(test$installer_grouped %in% install_top_15)] <- "other"
+test$installer_grouped <- as.factor(test$installer_grouped)
+```
+
+## 2.2 Numeric Variables
+We tried to replace incorrect (value = `0`) `longitude`, `latitude` and `gps_height` values with the mean of the `region` and related `district_code`. Running the model with the transformation the score got worse, hence we removed it.  
+
+### region, region_code, district_code
+We delete some variables related to the position of the pump, since we won't need all of them in the model. 
+
+```{r}
+train$region_code <- NULL
+test$region_code <- NULL
+
+train$district_code <- NULL
+test$district_code <- NULL
+
+train$ward <- NULL
+test$ward <- NULL
+
+train$subvillage <- NULL
+test$subvillage <- NULL
+```
+
+
+### day, month, distance
+We create two variables related to the date:  
+  
+* `dr_days`: days from the `date_recorded`  
+* `dr_month`: the month of `date_recorded`    
+  
+```{r}
+# create days, month and distance variables 
+train$dr_days <- as.numeric(as.Date("2014-01-01") - as.Date(train$date_recorded))
+train$dr_month <- month(ymd(train$date_recorded))
+
+# apply to test data
+test$dr_days <- as.numeric(as.Date("2014-01-01") - as.Date(test$date_recorded))
+test$dr_month <- month(ymd(test$date_recorded))
+```
+
+We create one variable related to the location:  
+  
+* `distance`: distance between c(0,0) and c(longitude,latitude) of each pump  
+  
+```{r}
+train$distance <- distGeo(as.matrix(train[,c('longitude','latitude')]), c(0,0))
+test$distance <- distGeo(as.matrix(test[,c('longitude','latitude')]), c(0,0))
+```
+
+# 3. Prediction
+We mainly spent time tuning the model, changing the number of trees `ntree` and the `features`.  
+The remaining data set has `r ncol(train)` features. After different attempts with different combination of features, we obtained the best result with the variables in the model below.  
+
+### Random Forest
+```{r}
+#  Set seed and create a random forest classifier
+ set.seed(1234)
+ 
+# model
+model_forest <- randomForest(status_group ~ installer_grouped + latitude + longitude + gps_height + scheme_management + public_meeting + permit + water_quality + quantity + payment_type + source_class + source +  management  +  management_group + basin + extraction_type + waterpoint_type + dr_days + dr_month + distance + region + population,
+                              data = train, 
+                              importance = T, 
+                              ntree = 1001, 
+                              mtries = 10,
+                              nodesize = 2
+                              )
+ 
+# predict the values in train
+pred_forest_train <- predict(model_forest, train)
+```
+  
+### Evaluation
+```{r}
+# confusion matrix
+confusionMatrix(pred_forest_train, train$status_group)
+```
+
+```{r}
+# variable importance
+importance(model_forest)
+varImpPlot(model_forest)
+```
+
+# 4. Submission
+
+```{r}
+# use same levels
+common <- intersect(names(train), names(test)) 
+for (p in common) {
+  if (class(train[[p]]) == "factor") { 
+    levels(test[[p]]) <- levels(train[[p]]) 
+   } 
+}
+ 
+# Predict using the test data
+pred_forest_test <- predict(model_forest, test)
+ 
+## create submission data frame
+# submission <- data.frame(test$id)
+# submission$status_group <- pred_forest_test
+# names(submission)[1] <- "id"
+# submission[sort(submission$id),]
+# 
+# write.csv(submission, file = "/filename/submission.csv", row.names = F)
+```
+
