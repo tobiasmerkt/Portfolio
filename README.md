@@ -3,6 +3,8 @@ This portfolio contains sample projects I've worked on and is constantly updated
 
 ## Machine Learning projects:
 
+### Telco Customer Churn: will be uploaded soon
+
 ### Fake News Detection (Python)
 In this project, a dataset with newspaper articles is used to train a machine learning model to detect fake news using a Naive Bayes classifier and Support Vector Machines (SVM). By using a grid search, removing stop words, and stemming, the algorithm detects fake news with an accuracy of 93%. 
 
