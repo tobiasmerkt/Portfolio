@@ -1,17 +1,4 @@
 # Portfolio
-This portfolio contains sample projects I've worked on and is constantly updated.
+This portfolio contains sample projects I've worked on and is constantly updated. Since I'm running short on time now, I just deleted old files without uploading newer ones. One of my most recent projects which I'm allowed to share was translating the actor-critic Tensorflow tutorial to Jax. Since I couldn't find good examples of AC in Jax online, I decided to share this file here:
 
-## Machine Learning projects:
-
-### Telco Customer Churn: will be uploaded soon
-
-### Fake News Detection (Python)
-In this project, a dataset with newspaper articles is used to train a machine learning model to detect fake news using a Naive Bayes classifier and Support Vector Machines (SVM). By using a grid search, removing stop words, and stemming, the algorithm detects fake news with an accuracy of 93%. 
-
-
-### Water Pumps Tanzania (R, Group Project)
-In this group project, my colleague and I created a Random Forest algorithm which predicts whether water pumps in Tanzania are "functional", "not functional", or "functional needs repair". The dataset and challenge is provided by DRIVENDATA (https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/page/23/). In this challenge, we achieved an accuracy of 81.96% and have ranked in the top 7% of participants (Date: 18.03.2018).
-
-
-## Data Cleaning Project: House Price Analysis
-I've used this Kaggle competition to practice my data cleaning skills. In the competition, a dataset with several variables is provided to calculate the final sales price of houses (https://www.kaggle.com/c/house-prices-advanced-regression-techniques). After cleaning the data, I've used lasso regression for feature selection and to predict the prices with a linear model.
+https://colab.research.google.com/drive/1PSwLmza97Sc57GHIr3hHjPLecNj_dFLE?usp=sharing
